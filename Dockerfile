@@ -16,6 +16,8 @@ RUN useradd -m -s /bin/bash agent \
 USER agent
 
 # Language toolchains are installed by SWARM_SETUP, not here.
+# Docker socket is bind-mounted at runtime by launch.sh when the
+# swarm config has "docker_socket": true (needed for Kurtosis).
 
 RUN curl -fsSL https://claude.ai/install.sh -o /tmp/claude-install.sh \
     && bash /tmp/claude-install.sh \

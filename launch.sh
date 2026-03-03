@@ -48,6 +48,7 @@ if [ -n "$CONFIG_FILE" ]; then
     INJECT_GIT_RULES=$(jq -r 'if has("inject_git_rules") then .inject_git_rules else true end' "$CONFIG_FILE")
     GIT_USER_NAME=$(jq -r '.git_user.name // "swarm-agent"' "$CONFIG_FILE")
     GIT_USER_EMAIL=$(jq -r '.git_user.email // "agent@claude-swarm.local"' "$CONFIG_FILE")
+    DOCKER_SOCKET=$(jq -r 'if .docker_socket then "true" else "false" end' "$CONFIG_FILE")
     NUM_AGENTS=$(jq '[.agents[].count] | add' "$CONFIG_FILE")
     # Parse generic env vars from config (if present).
     CUSTOM_ENV_ARGS=()
@@ -63,6 +64,7 @@ else
     INJECT_GIT_RULES="${SWARM_INJECT_GIT_RULES:-true}"
     GIT_USER_NAME="${SWARM_GIT_USER_NAME:-swarm-agent}"
     GIT_USER_EMAIL="${SWARM_GIT_USER_EMAIL:-agent@claude-swarm.local}"
+    DOCKER_SOCKET="false"
     EFFORT_LEVEL="${SWARM_EFFORT:-}"
     CUSTOM_ENV_ARGS=()
 fi
@@ -153,6 +155,12 @@ cmd_start() {
         MIRROR_ARGS+=($line)
     done < "/tmp/${PROJECT}-mirror-vols.txt"
 
+    # Mount Docker socket when config requests it (for Kurtosis).
+    DOCKER_SOCK_ARGS=()
+    if [ "$DOCKER_SOCKET" = "true" ]; then
+        DOCKER_SOCK_ARGS+=(-v "/var/run/docker.sock:/var/run/docker.sock")
+    fi
+
     AGENT_IDX=0
     while IFS='|' read -r agent_model agent_base_url agent_api_key agent_effort agent_auth; do
         AGENT_IDX=$((AGENT_IDX + 1))
@@ -200,6 +208,7 @@ cmd_start() {
             --name "$NAME" \
             -v "${BARE_REPO}:/upstream:rw" \
             "${MIRROR_ARGS[@]+"${MIRROR_ARGS[@]}"}" \
+            "${DOCKER_SOCK_ARGS[@]+"${DOCKER_SOCK_ARGS[@]}"}" \
             -e "ANTHROPIC_API_KEY=${resolved_api_key}" \
             "${EXTRA_ENV[@]+"${EXTRA_ENV[@]}"}" \
             "${CUSTOM_ENV_ARGS[@]+"${CUSTOM_ENV_ARGS[@]}"}" \
@@ -390,11 +399,18 @@ cmd_post_process() {
     [ -n "$pp_effort" ] \
         && EXTRA_ENV+=(-e "CLAUDE_CODE_EFFORT_LEVEL=${pp_effort}")
 
+    # Mount Docker socket when config requests it (for Kurtosis).
+    local DOCKER_SOCK_ARGS=()
+    if [ "$DOCKER_SOCKET" = "true" ]; then
+        DOCKER_SOCK_ARGS+=(-v "/var/run/docker.sock:/var/run/docker.sock")
+    fi
+
     echo "--- Starting post-processing (${pp_model}) ---"
     docker run -d \
         --name "$NAME" \
         -v "${BARE_REPO}:/upstream:rw" \
         "${MIRROR_ARGS[@]+"${MIRROR_ARGS[@]}"}" \
+        "${DOCKER_SOCK_ARGS[@]+"${DOCKER_SOCK_ARGS[@]}"}" \
         -e "ANTHROPIC_API_KEY=${pp_resolved_api_key}" \
         "${EXTRA_ENV[@]+"${EXTRA_ENV[@]}"}" \
         "${CUSTOM_ENV_ARGS[@]+"${CUSTOM_ENV_ARGS[@]}"}" \
