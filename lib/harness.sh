@@ -73,9 +73,12 @@ if [ ! -d "/workspace/.git" ]; then
     git checkout agent-work
 
     # Run project-specific setup if provided.
+    # Do NOT wrap in sudo: setup scripts use inline sudo for
+    # privileged ops, and wrapping strips Docker-injected env
+    # vars (ANTHROPIC_API_KEY, GITHUB_TOKEN, etc.).
     if [ -n "$SWARM_SETUP" ] && [ -f "$SWARM_SETUP" ]; then
         echo "[harness:${AGENT_ID}] Running ${SWARM_SETUP}..."
-        sudo bash "$SWARM_SETUP"
+        bash "$SWARM_SETUP"
     fi
 
     # Disable Claude Code's Co-Authored-By trailer; the hook-injected
@@ -100,6 +103,12 @@ if ! grep -q '^Model:' "$1"; then
 fi
 HOOK
     chmod +x .git/hooks/prepare-commit-msg
+
+    # Source PATH additions made by setup (Rust, Go, etc.)
+    # so that the claude session inherits them.
+    # shellcheck source=/dev/null
+    [ -f "$HOME/.cargo/env" ] && source "$HOME/.cargo/env"
+    export PATH="/usr/local/go/bin:$HOME/go/bin:${PATH}"
 
     mkdir -p agent_logs
     echo "[harness:${AGENT_ID}] Setup complete."
