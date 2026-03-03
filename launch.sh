@@ -49,6 +49,11 @@ if [ -n "$CONFIG_FILE" ]; then
     GIT_USER_NAME=$(jq -r '.git_user.name // "swarm-agent"' "$CONFIG_FILE")
     GIT_USER_EMAIL=$(jq -r '.git_user.email // "agent@claude-swarm.local"' "$CONFIG_FILE")
     NUM_AGENTS=$(jq '[.agents[].count] | add' "$CONFIG_FILE")
+    # Parse generic env vars from config (if present).
+    CUSTOM_ENV_ARGS=()
+    while IFS='=' read -r key value; do
+        [ -n "$key" ] && CUSTOM_ENV_ARGS+=(-e "${key}=${value}")
+    done < <(jq -r '.env // {} | to_entries[] | "\(.key)=\(.value)"' "$CONFIG_FILE")
 else
     NUM_AGENTS="${SWARM_NUM_AGENTS:-3}"
     CLAUDE_MODEL="${SWARM_MODEL:-claude-opus-4-6}"
@@ -59,6 +64,7 @@ else
     GIT_USER_NAME="${SWARM_GIT_USER_NAME:-swarm-agent}"
     GIT_USER_EMAIL="${SWARM_GIT_USER_EMAIL:-agent@claude-swarm.local}"
     EFFORT_LEVEL="${SWARM_EFFORT:-}"
+    CUSTOM_ENV_ARGS=()
 fi
 
 cmd_start() {
@@ -196,6 +202,7 @@ cmd_start() {
             "${MIRROR_ARGS[@]+"${MIRROR_ARGS[@]}"}" \
             -e "ANTHROPIC_API_KEY=${resolved_api_key}" \
             "${EXTRA_ENV[@]+"${EXTRA_ENV[@]}"}" \
+            "${CUSTOM_ENV_ARGS[@]+"${CUSTOM_ENV_ARGS[@]}"}" \
             -e "CLAUDE_MODEL=${agent_model}" \
             -e "SWARM_PROMPT=${SWARM_PROMPT}" \
             -e "SWARM_SETUP=${SWARM_SETUP}" \
@@ -390,6 +397,7 @@ cmd_post_process() {
         "${MIRROR_ARGS[@]+"${MIRROR_ARGS[@]}"}" \
         -e "ANTHROPIC_API_KEY=${pp_resolved_api_key}" \
         "${EXTRA_ENV[@]+"${EXTRA_ENV[@]}"}" \
+        "${CUSTOM_ENV_ARGS[@]+"${CUSTOM_ENV_ARGS[@]}"}" \
         -e "CLAUDE_MODEL=${pp_model}" \
         -e "SWARM_PROMPT=${pp_prompt}" \
         -e "SWARM_SETUP=${SWARM_SETUP:-}" \
