@@ -42,7 +42,9 @@ git remote remove "$REMOTE_NAME" 2>/dev/null || true
 
 echo "--- Fetching agent-work ---"
 git remote add "$REMOTE_NAME" "$BARE_REPO"
-git fetch "$REMOTE_NAME" agent-work
+# --no-recurse-submodules: bare repo has agent commits only,
+# no need to fetch submodule remotes (which may need SSH keys).
+git fetch --no-recurse-submodules "$REMOTE_NAME" agent-work
 
 COMMIT_LOG=$(git log --oneline "$REMOTE_NAME/agent-work" ^HEAD)
 NEW_COMMITS=$(echo "$COMMIT_LOG" | grep -c . || true)
