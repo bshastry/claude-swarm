@@ -37,6 +37,12 @@ RUN curl -fsSL \
     && chmod +x /usr/local/bin/kurtosis \
     && rm /tmp/kurtosis.tgz
 
+# Kurtosis CLI reads /etc/machine-id for anonymized metrics.
+# Slim images lack it; generate a stable placeholder.
+RUN test -f /etc/machine-id \
+    || echo "00000000000000000000000000000000" \
+       > /etc/machine-id
+
 # Claude Code refuses --dangerously-skip-permissions as root.
 # Nominal docker group so sg/newgrp references resolve.
 # Actual GID is injected at runtime via --group-add.
