@@ -95,14 +95,27 @@ cmd_start() {
     fi
 
     # Refuse to overwrite a bare repo that has unharvested commits.
+    # Use ancestry, not SHA equality: safe to overwrite only if
+    # agent-work exists in the local object store AND is already
+    # an ancestor of local HEAD (meaning harvest.sh pulled it in).
+    # SHAs differ after new local commits on top of the harvest.
     if [ -d "$BARE_REPO" ]; then
         BARE_HEAD=$(git -C "$BARE_REPO" rev-parse refs/heads/agent-work 2>/dev/null || true)
-        LOCAL_HEAD=$(git rev-parse HEAD 2>/dev/null || true)
-        if [ -n "$BARE_HEAD" ] && [ "$BARE_HEAD" != "$LOCAL_HEAD" ]; then
-            echo "ERROR: ${BARE_REPO} has unharvested agent commits." >&2
-            echo "       Run harvest.sh first, or remove it manually:" >&2
-            echo "       rm -rf ${BARE_REPO}" >&2
-            exit 1
+        if [ -n "$BARE_HEAD" ]; then
+            if ! git cat-file -e "$BARE_HEAD" 2>/dev/null; then
+                echo "ERROR: ${BARE_REPO} has unharvested agent commits" \
+                     "(commit ${BARE_HEAD:0:7} not found locally)." >&2
+                echo "       Run harvest.sh first, or remove it manually:" >&2
+                echo "       rm -rf ${BARE_REPO}" >&2
+                exit 1
+            fi
+            if ! git merge-base --is-ancestor "$BARE_HEAD" HEAD 2>/dev/null; then
+                echo "ERROR: ${BARE_REPO} has unharvested agent commits" \
+                     "(${BARE_HEAD:0:7} is not an ancestor of HEAD)." >&2
+                echo "       Run harvest.sh first, or remove it manually:" >&2
+                echo "       rm -rf ${BARE_REPO}" >&2
+                exit 1
+            fi
         fi
     fi
 
