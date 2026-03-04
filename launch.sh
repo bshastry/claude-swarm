@@ -165,7 +165,11 @@ cmd_start() {
         DOCKER_SOCK_ARGS+=(-v "/var/run/docker.sock:/var/run/docker.sock")
         DOCKER_SOCK_ARGS+=(--network host)
         if [ -S /var/run/docker.sock ]; then
-            DOCKER_SOCK_ARGS+=(--group-add "$(stat -c '%g' /var/run/docker.sock)")
+            local sock_gid
+            sock_gid=$(stat -c '%g' /var/run/docker.sock)
+            DOCKER_SOCK_ARGS+=(--group-add "$sock_gid")
+        else
+            echo "WARNING: docker_socket=true but /var/run/docker.sock not found; --group-add skipped." >&2
         fi
     fi
 
@@ -413,7 +417,11 @@ cmd_post_process() {
         DOCKER_SOCK_ARGS+=(-v "/var/run/docker.sock:/var/run/docker.sock")
         DOCKER_SOCK_ARGS+=(--network host)
         if [ -S /var/run/docker.sock ]; then
-            DOCKER_SOCK_ARGS+=(--group-add "$(stat -c '%g' /var/run/docker.sock)")
+            local sock_gid
+            sock_gid=$(stat -c '%g' /var/run/docker.sock)
+            DOCKER_SOCK_ARGS+=(--group-add "$sock_gid")
+        else
+            echo "WARNING: docker_socket=true but /var/run/docker.sock not found; --group-add skipped." >&2
         fi
     fi
 
