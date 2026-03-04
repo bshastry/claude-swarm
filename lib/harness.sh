@@ -28,6 +28,17 @@ HELP
 fi
 
 AGENT_ID="${AGENT_ID:-unnamed}"
+
+# Fallback: if Docker socket is mounted but not readable
+# by the agent user (launcher did not pass --group-add),
+# fix permissions via sudo. Only fires on EACCES (not
+# readable), NOT on daemon-down (ECONNREFUSED). The
+# agent user has passwordless sudo.
+if [ -S /var/run/docker.sock ] && [ ! -r /var/run/docker.sock ]; then
+    echo "[harness:${AGENT_ID}] Fixing Docker socket permissions..."
+    sudo chmod 660 /var/run/docker.sock
+fi
+
 CLAUDE_MODEL="${CLAUDE_MODEL:-claude-opus-4-6}"
 SWARM_PROMPT="${SWARM_PROMPT:?SWARM_PROMPT is required.}"
 SWARM_SETUP="${SWARM_SETUP:-}"
