@@ -24,14 +24,32 @@ RUN curl -fsSL \
        -C /usr/local/bin/ docker/docker \
     && rm /tmp/docker.tgz
 
+# Kurtosis CLI (Phase 4 devnet validation).
+ARG KURTOSIS_VERSION=1.16.4
+ARG KURTOSIS_SHA256=35bfced7b709963902880217171ed20f009c45384901d20d97226a9382b9a62c
+RUN curl -fsSL \
+      "https://github.com/kurtosis-tech/kurtosis-cli-release-artifacts/releases/download/${KURTOSIS_VERSION}/kurtosis-cli_${KURTOSIS_VERSION}_linux_amd64.tar.gz" \
+      -o /tmp/kurtosis.tgz \
+    && echo "${KURTOSIS_SHA256}  /tmp/kurtosis.tgz" \
+       | sha256sum -c - \
+    && tar -xzf /tmp/kurtosis.tgz \
+       -C /usr/local/bin/ kurtosis \
+    && chmod +x /usr/local/bin/kurtosis \
+    && rm /tmp/kurtosis.tgz
+
 # Claude Code refuses --dangerously-skip-permissions as root.
-RUN useradd -m -s /bin/bash agent \
+# Nominal docker group so sg/newgrp references resolve.
+# Actual GID is injected at runtime via --group-add.
+RUN groupadd docker \
+    && useradd -m -s /bin/bash -G docker agent \
     && echo "agent ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/agent
 USER agent
 
-# Language toolchains are installed by SWARM_SETUP, not here.
-# Docker socket is bind-mounted at runtime by launch.sh when the
-# swarm config has "docker_socket": true (needed for Kurtosis).
+# Language toolchains are installed by SWARM_SETUP,
+# not here. Docker CLI and Kurtosis CLI are pre-
+# installed above. Docker socket is bind-mounted at
+# runtime by launch.sh when the swarm config has
+# "docker_socket": true.
 
 RUN curl -fsSL https://claude.ai/install.sh -o /tmp/claude-install.sh \
     && bash /tmp/claude-install.sh \
