@@ -156,9 +156,17 @@ cmd_start() {
     done < "/tmp/${PROJECT}-mirror-vols.txt"
 
     # Mount Docker socket when config requests it (for Kurtosis).
+    # --group-add: match host socket GID so agent user can access.
+    # --network host: Kurtosis publishes ports on 127.0.0.1;
+    #   bridge-networked containers cannot reach them.
+    # Note: stat -c is GNU coreutils (Linux-only, not macOS).
     DOCKER_SOCK_ARGS=()
     if [ "$DOCKER_SOCKET" = "true" ]; then
         DOCKER_SOCK_ARGS+=(-v "/var/run/docker.sock:/var/run/docker.sock")
+        DOCKER_SOCK_ARGS+=(--network host)
+        if [ -S /var/run/docker.sock ]; then
+            DOCKER_SOCK_ARGS+=(--group-add "$(stat -c '%g' /var/run/docker.sock)")
+        fi
     fi
 
     AGENT_IDX=0
@@ -403,6 +411,10 @@ cmd_post_process() {
     local DOCKER_SOCK_ARGS=()
     if [ "$DOCKER_SOCKET" = "true" ]; then
         DOCKER_SOCK_ARGS+=(-v "/var/run/docker.sock:/var/run/docker.sock")
+        DOCKER_SOCK_ARGS+=(--network host)
+        if [ -S /var/run/docker.sock ]; then
+            DOCKER_SOCK_ARGS+=(--group-add "$(stat -c '%g' /var/run/docker.sock)")
+        fi
     fi
 
     echo "--- Starting post-processing (${pp_model}) ---"
