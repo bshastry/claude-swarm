@@ -154,6 +154,14 @@ while true; do
            "${APPEND_ARGS[@]+"${APPEND_ARGS[@]}"}" \
            --output-format json > "$LOGFILE" 2>"${LOGFILE}.err" || true
 
+    # Error detection (BUG-003).
+    is_err=$(jq -r '.is_error // false' "$LOGFILE" \
+      2>/dev/null || true)
+    is_err="${is_err:-false}"
+    err_result=$(jq -r '.result // ""' "$LOGFILE" \
+      2>/dev/null || true)
+    err_result="${err_result:-}"
+
     # Extract usage stats from JSON output.
     cost=$(jq -r '.total_cost_usd // 0' "$LOGFILE" 2>/dev/null || true)
     cost="${cost:-0}"
@@ -172,10 +180,15 @@ while true; do
     cache_cr=$(jq -r '.usage.cache_creation_input_tokens // 0' "$LOGFILE" 2>/dev/null || true)
     cache_cr="${cache_cr:-0}"
     mkdir -p "$(dirname "$STATS_FILE")"
-    printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" \
-        "$(date +%s)" "$cost" "$tok_in" "$tok_out" \
-        "$cache_rd" "$cache_cr" "$dur" "$api_ms" "$turns" \
-        >> "$STATS_FILE"
+    # Skip TSV for error sessions (e.g. rate limit)
+    # to avoid inflating dashboard turn count.
+    if [ "$is_err" != "true" ]; then
+        printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" \
+            "$(date +%s)" "$cost" "$tok_in" "$tok_out" \
+            "$cache_rd" "$cache_cr" "$dur" "$api_ms" \
+            "$turns" \
+            >> "$STATS_FILE"
+    fi
     echo "[harness:${AGENT_ID}] Session cost=\$${cost} tokens=${tok_in}/${tok_out} turns=${turns} duration=${dur}ms"
 
     git fetch origin
