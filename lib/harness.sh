@@ -129,6 +129,8 @@ cd /workspace
 STATS_FILE="/workspace/${STATS_FILE}"
 
 IDLE_COUNT=0
+BACKOFF=300
+RATE_LIMIT_COUNT=0
 
 while true; do
     # Reset to latest. Do not re-init submodules; setup changes would be lost.
@@ -153,6 +155,14 @@ while true; do
            "${APPEND_ARGS[@]+"${APPEND_ARGS[@]}"}" \
            --output-format json > "$LOGFILE" 2>"${LOGFILE}.err" || true
 
+    # Error detection (BUG-003).
+    is_err=$(jq -r '.is_error // false' "$LOGFILE" \
+      2>/dev/null || true)
+    is_err="${is_err:-false}"
+    err_result=$(jq -r '.result // ""' "$LOGFILE" \
+      2>/dev/null || true)
+    err_result="${err_result:-}"
+
     # Extract usage stats from JSON output.
     cost=$(jq -r '.total_cost_usd // 0' "$LOGFILE" 2>/dev/null || true)
     cost="${cost:-0}"
@@ -171,11 +181,65 @@ while true; do
     cache_cr=$(jq -r '.usage.cache_creation_input_tokens // 0' "$LOGFILE" 2>/dev/null || true)
     cache_cr="${cache_cr:-0}"
     mkdir -p "$(dirname "$STATS_FILE")"
-    printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" \
-        "$(date +%s)" "$cost" "$tok_in" "$tok_out" \
-        "$cache_rd" "$cache_cr" "$dur" "$api_ms" "$turns" \
-        >> "$STATS_FILE"
+    # Skip TSV for error sessions (e.g. rate limit)
+    # to avoid inflating dashboard turn count.
+    if [ "$is_err" != "true" ]; then
+        printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" \
+            "$(date +%s)" "$cost" "$tok_in" "$tok_out" \
+            "$cache_rd" "$cache_cr" "$dur" "$api_ms" \
+            "$turns" \
+            >> "$STATS_FILE"
+    fi
     echo "[harness:${AGENT_ID}] Session cost=\$${cost} tokens=${tok_in}/${tok_out} turns=${turns} duration=${dur}ms"
+
+    # --- Error surfacing (BUG-003) ---
+    err_file="${LOGFILE}.err"
+    if [ "$is_err" = "true" ]; then
+        echo "[harness:${AGENT_ID}] ERROR: ${err_result}"
+
+        # Rate-limit backoff (BUG-002): sleep + retry
+        # instead of counting toward idle limit.
+        if echo "$err_result" \
+            | grep -qiE \
+              "hit your limit|rate.limit|quota"; then
+            JITTER=$((RANDOM % 60))
+            RATE_LIMIT_COUNT=$((RATE_LIMIT_COUNT + 1))
+            echo "[harness:${AGENT_ID}]" \
+                 "rate-limit ${RATE_LIMIT_COUNT}" \
+                 "(sleeping $((BACKOFF + JITTER))s)..."
+            # Signal-aware sleep: responds to docker
+            # stop SIGTERM instead of blocking until
+            # SIGKILL after the 10s grace period.
+            trap 'exit 0' TERM INT
+            sleep $((BACKOFF + JITTER)) &
+            wait $! || true
+            trap - TERM INT
+            # Exponential backoff, cap at 30 min.
+            BACKOFF=$((BACKOFF * 2))
+            if [ "$BACKOFF" -gt 1800 ]; then
+                BACKOFF=1800
+            fi
+            continue
+        fi
+
+        # Non-rate-limit errors (auth failure, network,
+        # corrupt prompt): slow down cycling but still
+        # count toward idle limit. Auth failures need
+        # operator intervention, not infinite retry.
+        trap 'exit 0' TERM INT
+        sleep 30 &
+        wait $! || true
+        trap - TERM INT
+    fi
+    if [ -s "$err_file" ]; then
+        echo "[harness:${AGENT_ID}] STDERR:" \
+             "$(head -3 "$err_file")"
+    fi
+    # Reset backoff on any non-error session.
+    if [ "$is_err" != "true" ]; then
+        BACKOFF=300
+        RATE_LIMIT_COUNT=0
+    fi
 
     git fetch origin
     AFTER=$(git rev-parse origin/agent-work)
@@ -189,6 +253,8 @@ while true; do
         fi
     else
         IDLE_COUNT=0
+        BACKOFF=300
+        RATE_LIMIT_COUNT=0
         echo "[harness:${AGENT_ID}] Session ended. Restarting..."
     fi
 done
