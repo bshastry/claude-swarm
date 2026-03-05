@@ -130,6 +130,7 @@ STATS_FILE="/workspace/${STATS_FILE}"
 
 IDLE_COUNT=0
 BACKOFF=300
+RATE_LIMIT_COUNT=0
 
 while true; do
     # Reset to latest. Do not re-init submodules; setup changes would be lost.
@@ -199,10 +200,12 @@ while true; do
         # Rate-limit backoff (BUG-002): sleep + retry
         # instead of counting toward idle limit.
         if echo "$err_result" \
-            | grep -qi \
-              "hit your limit\|rate.limit\|quota"; then
+            | grep -qiE \
+              "hit your limit|rate.limit|quota"; then
             JITTER=$((RANDOM % 60))
-            echo "[harness:${AGENT_ID}] rate-limit" \
+            RATE_LIMIT_COUNT=$((RATE_LIMIT_COUNT + 1))
+            echo "[harness:${AGENT_ID}]" \
+                 "rate-limit ${RATE_LIMIT_COUNT}" \
                  "(sleeping $((BACKOFF + JITTER))s)..."
             # Signal-aware sleep: responds to docker
             # stop SIGTERM instead of blocking until
@@ -223,7 +226,10 @@ while true; do
         # corrupt prompt): slow down cycling but still
         # count toward idle limit. Auth failures need
         # operator intervention, not infinite retry.
-        sleep 30
+        trap 'exit 0' TERM INT
+        sleep 30 &
+        wait $! || true
+        trap - TERM INT
     fi
     if [ -s "$err_file" ]; then
         echo "[harness:${AGENT_ID}] STDERR:" \
@@ -232,6 +238,7 @@ while true; do
     # Reset backoff on any non-error session.
     if [ "$is_err" != "true" ]; then
         BACKOFF=300
+        RATE_LIMIT_COUNT=0
     fi
 
     git fetch origin
@@ -247,6 +254,7 @@ while true; do
     else
         IDLE_COUNT=0
         BACKOFF=300
+        RATE_LIMIT_COUNT=0
         echo "[harness:${AGENT_ID}] Session ended. Restarting..."
     fi
 done

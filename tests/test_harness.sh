@@ -317,8 +317,8 @@ assert_eq "rate limit message" \
     "You've hit your limit · resets 1am (UTC)" \
     "$err_result"
 # Verify grep pattern matches.
-echo "$err_result" | grep -qi \
-    "hit your limit\|rate.limit\|quota"
+echo "$err_result" | grep -qiE \
+    "hit your limit|rate.limit|quota"
 assert_eq "rate limit grep matches" "0" "$?"
 
 # ============================================================
@@ -341,8 +341,8 @@ IFS=$'\t' read -r is_err err_result <<< "$LINE"
 assert_eq "auth err is_error" "true" "$is_err"
 # Should NOT match rate-limit pattern.
 grep_rc=0
-echo "$err_result" | grep -qi \
-    "hit your limit\|rate.limit\|quota" || grep_rc=$?
+echo "$err_result" | grep -qiE \
+    "hit your limit|rate.limit|quota" || grep_rc=$?
 assert_eq "auth err not rate limit" "1" \
     "$grep_rc"
 
@@ -446,6 +446,43 @@ assert_eq "stderr head -3 lines" "3" \
 assert_eq "stderr first line" \
     "error: connection refused" \
     "$(echo "$STDERR_OUT" | head -1)"
+
+# ============================================================
+echo ""
+echo "=== 19. TSV guard: error sessions skip TSV ==="
+
+TSV_FILE="$TMPDIR/stats.tsv"
+: > "$TSV_FILE"
+
+# Error session: should NOT write to TSV.
+is_err="true"
+if [ "$is_err" != "true" ]; then
+    echo "should not appear" >> "$TSV_FILE"
+fi
+assert_eq "tsv not written on error" "0" \
+    "$(wc -l < "$TSV_FILE" | tr -d ' ')"
+
+# Successful session: should write to TSV.
+is_err="false"
+if [ "$is_err" != "true" ]; then
+    echo "should appear" >> "$TSV_FILE"
+fi
+assert_eq "tsv written on success" "1" \
+    "$(wc -l < "$TSV_FILE" | tr -d ' ')"
+
+# ============================================================
+echo ""
+echo "=== 20. Backoff reset after non-error session ==="
+
+BACKOFF=1200
+is_err="false"
+if [ "$is_err" != "true" ]; then BACKOFF=300; fi
+assert_eq "backoff reset" "300" "$BACKOFF"
+
+BACKOFF=1800
+is_err="true"
+if [ "$is_err" != "true" ]; then BACKOFF=300; fi
+assert_eq "backoff kept on error" "1800" "$BACKOFF"
 
 # ============================================================
 echo ""
