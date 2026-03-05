@@ -129,6 +129,7 @@ cd /workspace
 STATS_FILE="/workspace/${STATS_FILE}"
 
 IDLE_COUNT=0
+BACKOFF=300
 
 while true; do
     # Reset to latest. Do not re-init submodules; setup changes would be lost.
