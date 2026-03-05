@@ -191,6 +191,49 @@ while true; do
     fi
     echo "[harness:${AGENT_ID}] Session cost=\$${cost} tokens=${tok_in}/${tok_out} turns=${turns} duration=${dur}ms"
 
+    # --- Error surfacing (BUG-003) ---
+    err_file="${LOGFILE}.err"
+    if [ "$is_err" = "true" ]; then
+        echo "[harness:${AGENT_ID}] ERROR: ${err_result}"
+
+        # Rate-limit backoff (BUG-002): sleep + retry
+        # instead of counting toward idle limit.
+        if echo "$err_result" \
+            | grep -qi \
+              "hit your limit\|rate.limit\|quota"; then
+            JITTER=$((RANDOM % 60))
+            echo "[harness:${AGENT_ID}] rate-limit" \
+                 "(sleeping $((BACKOFF + JITTER))s)..."
+            # Signal-aware sleep: responds to docker
+            # stop SIGTERM instead of blocking until
+            # SIGKILL after the 10s grace period.
+            trap 'exit 0' TERM INT
+            sleep $((BACKOFF + JITTER)) &
+            wait $! || true
+            trap - TERM INT
+            # Exponential backoff, cap at 30 min.
+            BACKOFF=$((BACKOFF * 2))
+            if [ "$BACKOFF" -gt 1800 ]; then
+                BACKOFF=1800
+            fi
+            continue
+        fi
+
+        # Non-rate-limit errors (auth failure, network,
+        # corrupt prompt): slow down cycling but still
+        # count toward idle limit. Auth failures need
+        # operator intervention, not infinite retry.
+        sleep 30
+    fi
+    if [ -s "$err_file" ]; then
+        echo "[harness:${AGENT_ID}] STDERR:" \
+             "$(head -3 "$err_file")"
+    fi
+    # Reset backoff on any non-error session.
+    if [ "$is_err" != "true" ]; then
+        BACKOFF=300
+    fi
+
     git fetch origin
     AFTER=$(git rev-parse origin/agent-work)
 
