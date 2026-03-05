@@ -49,6 +49,18 @@ extract_stats() {
         "$cache_rd" "$cache_cr" "$dur" "$api_ms" "$turns"
 }
 
+extract_error() {
+    local logfile="$1"
+    local is_err err_result
+    is_err=$(jq -r '.is_error // false' "$logfile" \
+      2>/dev/null || true)
+    is_err="${is_err:-false}"
+    err_result=$(jq -r '.result // ""' "$logfile" \
+      2>/dev/null || true)
+    err_result="${err_result:-}"
+    printf "%s\t%s" "$is_err" "$err_result"
+}
+
 # ============================================================
 echo "=== 1. Full JSON output parsing ==="
 
@@ -281,6 +293,159 @@ assert_eq "attr commit empty" "" \
     "$(echo "$ATTR_JSON" | jq -r '.attribution.commit')"
 assert_eq "attr pr empty" "" \
     "$(echo "$ATTR_JSON" | jq -r '.attribution.pr')"
+
+# ============================================================
+echo ""
+echo "=== 11. Error detection: rate limit ==="
+
+cat > "$TMPDIR/ratelimit.json" <<'EOF'
+{
+  "type": "result",
+  "is_error": true,
+  "result": "You've hit your limit · resets 1am (UTC)",
+  "total_cost_usd": 0,
+  "num_turns": 1,
+  "duration_ms": 357
+}
+EOF
+
+LINE=$(extract_error "$TMPDIR/ratelimit.json")
+IFS=$'\t' read -r is_err err_result <<< "$LINE"
+
+assert_eq "rate limit is_error" "true" "$is_err"
+assert_eq "rate limit message" \
+    "You've hit your limit · resets 1am (UTC)" \
+    "$err_result"
+# Verify grep pattern matches.
+echo "$err_result" | grep -qi \
+    "hit your limit\|rate.limit\|quota"
+assert_eq "rate limit grep matches" "0" "$?"
+
+# ============================================================
+echo ""
+echo "=== 12. Error detection: non-rate-limit ==="
+
+cat > "$TMPDIR/autherr.json" <<'EOF'
+{
+  "type": "result",
+  "is_error": true,
+  "result": "Authentication failed: invalid token",
+  "total_cost_usd": 0,
+  "num_turns": 1
+}
+EOF
+
+LINE=$(extract_error "$TMPDIR/autherr.json")
+IFS=$'\t' read -r is_err err_result <<< "$LINE"
+
+assert_eq "auth err is_error" "true" "$is_err"
+# Should NOT match rate-limit pattern.
+grep_rc=0
+echo "$err_result" | grep -qi \
+    "hit your limit\|rate.limit\|quota" || grep_rc=$?
+assert_eq "auth err not rate limit" "1" \
+    "$grep_rc"
+
+# ============================================================
+echo ""
+echo "=== 13. Error detection: successful session ==="
+
+cat > "$TMPDIR/success.json" <<'EOF'
+{
+  "type": "result",
+  "is_error": false,
+  "result": "Task completed successfully",
+  "total_cost_usd": 5.23,
+  "num_turns": 42
+}
+EOF
+
+LINE=$(extract_error "$TMPDIR/success.json")
+IFS=$'\t' read -r is_err err_result <<< "$LINE"
+
+assert_eq "success is_error" "false" "$is_err"
+
+# ============================================================
+echo ""
+echo "=== 14. Error detection: malformed JSON ==="
+
+echo "not json" > "$TMPDIR/garbage2.txt"
+
+LINE=$(extract_error "$TMPDIR/garbage2.txt")
+IFS=$'\t' read -r is_err err_result <<< "$LINE"
+
+assert_eq "garbage is_error default" "false" "$is_err"
+
+# ============================================================
+echo ""
+echo "=== 15. Error detection: empty file ==="
+
+: > "$TMPDIR/empty2.json"
+
+LINE=$(extract_error "$TMPDIR/empty2.json")
+IFS=$'\t' read -r is_err err_result <<< "$LINE"
+
+assert_eq "empty is_error default" "false" "$is_err"
+
+# ============================================================
+echo ""
+echo "=== 16. False positive guard ==="
+
+# Successful session whose result text mentions
+# rate limiting — must NOT trigger backoff.
+cat > "$TMPDIR/fp.json" <<'EOF'
+{
+  "type": "result",
+  "is_error": false,
+  "result": "I checked and you've hit your limit on the API",
+  "total_cost_usd": 3.50,
+  "num_turns": 15
+}
+EOF
+
+LINE=$(extract_error "$TMPDIR/fp.json")
+IFS=$'\t' read -r is_err err_result <<< "$LINE"
+
+assert_eq "fp is_error false" "false" "$is_err"
+# The grep would match, but is_err is false so the
+# rate-limit block should never be entered.
+# This test documents the invariant.
+
+# ============================================================
+echo ""
+echo "=== 17. Backoff escalation ==="
+
+# Simulate exponential backoff sequence.
+simulate_backoff() {
+    local backoff="$1" max="$2"
+    backoff=$((backoff * 2))
+    if [ "$backoff" -gt "$max" ]; then
+        backoff="$max"
+    fi
+    echo "$backoff"
+}
+
+assert_eq "300->600"   "600"  "$(simulate_backoff 300 1800)"
+assert_eq "600->1200"  "1200" "$(simulate_backoff 600 1800)"
+assert_eq "1200->1800" "1800" "$(simulate_backoff 1200 1800)"
+assert_eq "1800 cap"   "1800" "$(simulate_backoff 1800 1800)"
+
+# ============================================================
+echo ""
+echo "=== 18. Stderr surfacing ==="
+
+echo "error: connection refused" > "$TMPDIR/test.err"
+echo "at line 42" >> "$TMPDIR/test.err"
+echo "in function foo()" >> "$TMPDIR/test.err"
+echo "extra line" >> "$TMPDIR/test.err"
+
+STDERR_OUT=$(head -3 "$TMPDIR/test.err")
+LINE_COUNT=$(echo "$STDERR_OUT" | wc -l)
+assert_eq "stderr head -3 lines" "3" \
+    "$(echo "$LINE_COUNT" | tr -d ' ')"
+assert_eq "stderr first line" \
+    "error: connection refused" \
+    "$(echo "$STDERR_OUT" | head -1)"
 
 # ============================================================
 echo ""
