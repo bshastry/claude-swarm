@@ -246,6 +246,7 @@ while true; do
         fi
     else
         IDLE_COUNT=0
+        BACKOFF=300
         echo "[harness:${AGENT_ID}] Session ended. Restarting..."
     fi
 done
