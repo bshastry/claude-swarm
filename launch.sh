@@ -13,6 +13,42 @@ SWARM_RUN_CONTEXT="${PROJECT}@${SWARM_RUN_HASH} (${SWARM_RUN_BRANCH})"
 BARE_REPO="/tmp/${PROJECT}-upstream.git"
 IMAGE_NAME="${PROJECT}-agent"
 
+# Populate _CRED_ENV with -e flags for Docker credential
+# injection. Caller copies the result after invocation.
+# Compatible with bash 3.2+ (no nameref).
+_CRED_ENV=()
+build_cred_env() {
+    local auth=$1 api_key=$2 base_url=${3:-}
+    _CRED_ENV=()
+    case "$auth" in
+        oauth)
+            [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] \
+                && _CRED_ENV+=(-e \
+                    "CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}")
+            ;;
+        apikey)
+            local resolved="${api_key:-${ANTHROPIC_API_KEY:-}}"
+            [ -n "$resolved" ] \
+                && _CRED_ENV+=(-e "ANTHROPIC_API_KEY=${resolved}")
+            ;;
+        *)
+            local resolved="${api_key:-${ANTHROPIC_API_KEY:-}}"
+            [ -n "$resolved" ] \
+                && _CRED_ENV+=(-e "ANTHROPIC_API_KEY=${resolved}")
+            [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] \
+                && _CRED_ENV+=(-e \
+                    "CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}")
+            ;;
+    esac
+    if [ -n "$base_url" ]; then
+        _CRED_ENV+=(-e "ANTHROPIC_BASE_URL=${base_url}")
+    elif [ -n "${ANTHROPIC_BASE_URL:-}" ]; then
+        _CRED_ENV+=(-e "ANTHROPIC_BASE_URL=${ANTHROPIC_BASE_URL}")
+    fi
+    [ -n "${ANTHROPIC_AUTH_TOKEN:-}" ] \
+        && _CRED_ENV+=(-e "ANTHROPIC_AUTH_TOKEN=${ANTHROPIC_AUTH_TOKEN}")
+}
+
 # Docker containers may create files owned by a different UID inside
 # bind-mounted host directories.  Plain rm -rf fails without root.
 # Use a throwaway Alpine container (Docker is already required) so
@@ -140,6 +176,73 @@ cmd_start() {
     echo "--- Building agent image ---"
     docker build -t "$IMAGE_NAME" -f "$SWARM_DIR/Dockerfile" "$SWARM_DIR"
 
+    # -- Auth smoke test ----------------------------------
+    # Run a throwaway container to verify credentials work
+    # before launching agents and running 10-min setup.
+    local SKIP_SMOKE="${SWARM_SKIP_SMOKE:-false}"
+    if [ "$SKIP_SMOKE" != "true" ]; then
+        echo "--- Auth smoke test ---"
+        local smoke_auth="" smoke_api_key="" smoke_base_url=""
+        if [ -n "$CONFIG_FILE" ]; then
+            smoke_auth=$(jq -r \
+                '.agents[0].auth // ""' "$CONFIG_FILE")
+            smoke_api_key=$(jq -r \
+                '.agents[0].api_key // ""' "$CONFIG_FILE")
+            smoke_base_url=$(jq -r \
+                '.agents[0].base_url // ""' "$CONFIG_FILE")
+        fi
+        if [ -z "$smoke_auth" ] && [ -n "$smoke_api_key" ]; then
+            smoke_auth="apikey"
+        fi
+
+        build_cred_env "$smoke_auth" "$smoke_api_key" \
+            "$smoke_base_url"
+        local SMOKE_CRED=("${_CRED_ENV[@]+"${_CRED_ENV[@]}"}")
+
+        local smoke_json="/tmp/${PROJECT}-smoke.json"
+        local smoke_err="/tmp/${PROJECT}-smoke.err"
+        # shellcheck disable=SC2317
+        _smoke_cleanup() {
+            rm -f "$smoke_json" "$smoke_err"
+        }
+        trap _smoke_cleanup RETURN
+
+        local SMOKE_RC=0
+        timeout 60 docker run --rm \
+            --entrypoint claude \
+            "${SMOKE_CRED[@]+"${SMOKE_CRED[@]}"}" \
+            "$IMAGE_NAME" \
+            --dangerously-skip-permissions \
+            -p "respond with the single word: ok" \
+            --max-turns 1 \
+            --output-format json \
+            > "$smoke_json" \
+            2>"$smoke_err" \
+        || SMOKE_RC=$?
+
+        if [ "$SMOKE_RC" -eq 124 ]; then
+            echo "ERROR: Auth smoke test timed out (60s)." >&2
+            cat "$smoke_err" >&2
+            exit 1
+        fi
+
+        if [ "$SMOKE_RC" -ne 0 ]; then
+            echo "ERROR: Auth smoke test exited with" \
+                 "code ${SMOKE_RC}." >&2
+            cat "$smoke_err" >&2
+            exit 1
+        fi
+
+        if jq -e '.is_error == true' "$smoke_json" \
+            >/dev/null 2>&1; then
+            echo "ERROR: Auth smoke test failed." >&2
+            jq -r '.result' "$smoke_json" >&2
+            exit 1
+        fi
+
+        echo "--- Auth smoke test passed ---"
+    fi
+
     # Build mirror volume args from discovered submodules.
     git submodule foreach --quiet 'echo "$name"' | while read -r name; do
         safe_name="${name//\//_}"
@@ -195,38 +298,16 @@ cmd_start() {
         docker rm -f "$NAME" 2>/dev/null || true
 
         echo "--- Launching ${NAME} (${agent_model}${agent_effort:+ effort=${agent_effort}}${agent_auth:+ auth=${agent_auth}}) ---"
-        EXTRA_ENV=()
-        if [ -n "$agent_base_url" ]; then
-            EXTRA_ENV+=(-e "ANTHROPIC_BASE_URL=${agent_base_url}")
-        elif [ -n "${ANTHROPIC_BASE_URL:-}" ]; then
-            EXTRA_ENV+=(-e "ANTHROPIC_BASE_URL=${ANTHROPIC_BASE_URL}")
-        fi
-        [ -n "${ANTHROPIC_AUTH_TOKEN:-}" ] \
-            && EXTRA_ENV+=(-e "ANTHROPIC_AUTH_TOKEN=${ANTHROPIC_AUTH_TOKEN}")
-
-        # Auto-tag agents with a custom api_key as "apikey" for the dashboard.
+        # Auto-tag agents with a custom api_key as "apikey".
         if [ -z "$agent_auth" ] && [ -n "$agent_api_key" ]; then
             agent_auth="apikey"
         fi
 
-        # Per-agent auth source: "oauth" = subscription only,
-        # "apikey" = API key only, "" = pass both (CLI decides).
-        local resolved_api_key
-        case "${agent_auth}" in
-            oauth)
-                resolved_api_key=""
-                EXTRA_ENV+=(-e "CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}")
-                ;;
-            apikey)
-                resolved_api_key="${agent_api_key:-${ANTHROPIC_API_KEY:-}}"
-                ;;
-            *)
-                resolved_api_key="${agent_api_key:-${ANTHROPIC_API_KEY:-}}"
-                [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] \
-                    && EXTRA_ENV+=(-e "CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}")
-                ;;
-        esac
+        build_cred_env "$agent_auth" "$agent_api_key" \
+            "$agent_base_url"
+        local AGENT_CRED=("${_CRED_ENV[@]+"${_CRED_ENV[@]}"}")
 
+        local EXTRA_ENV=()
         local eff="${agent_effort:-${EFFORT_LEVEL:-}}"
         [ -n "$eff" ] \
             && EXTRA_ENV+=(-e "CLAUDE_CODE_EFFORT_LEVEL=${eff}")
@@ -236,7 +317,7 @@ cmd_start() {
             -v "${BARE_REPO}:/upstream:rw" \
             "${MIRROR_ARGS[@]+"${MIRROR_ARGS[@]}"}" \
             "${DOCKER_SOCK_ARGS[@]+"${DOCKER_SOCK_ARGS[@]}"}" \
-            -e "ANTHROPIC_API_KEY=${resolved_api_key}" \
+            "${AGENT_CRED[@]+"${AGENT_CRED[@]}"}" \
             "${EXTRA_ENV[@]+"${EXTRA_ENV[@]}"}" \
             "${CUSTOM_ENV_ARGS[@]+"${CUSTOM_ENV_ARGS[@]}"}" \
             -e "CLAUDE_MODEL=${agent_model}" \
@@ -398,31 +479,10 @@ cmd_post_process() {
         pp_auth="apikey"
     fi
 
+    build_cred_env "$pp_auth" "$pp_api_key" "$pp_base_url"
+    local PP_CRED=("${_CRED_ENV[@]+"${_CRED_ENV[@]}"}")
+
     local EXTRA_ENV=()
-    if [ -n "$pp_base_url" ]; then
-        EXTRA_ENV+=(-e "ANTHROPIC_BASE_URL=${pp_base_url}")
-    elif [ -n "${ANTHROPIC_BASE_URL:-}" ]; then
-        EXTRA_ENV+=(-e "ANTHROPIC_BASE_URL=${ANTHROPIC_BASE_URL}")
-    fi
-    [ -n "${ANTHROPIC_AUTH_TOKEN:-}" ] \
-        && EXTRA_ENV+=(-e "ANTHROPIC_AUTH_TOKEN=${ANTHROPIC_AUTH_TOKEN}")
-
-    local pp_resolved_api_key
-    case "${pp_auth}" in
-        oauth)
-            pp_resolved_api_key=""
-            EXTRA_ENV+=(-e "CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}")
-            ;;
-        apikey)
-            pp_resolved_api_key="${pp_api_key:-${ANTHROPIC_API_KEY:-}}"
-            ;;
-        *)
-            pp_resolved_api_key="${pp_api_key:-${ANTHROPIC_API_KEY:-}}"
-            [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] \
-                && EXTRA_ENV+=(-e "CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}")
-            ;;
-    esac
-
     [ -n "$pp_effort" ] \
         && EXTRA_ENV+=(-e "CLAUDE_CODE_EFFORT_LEVEL=${pp_effort}")
 
@@ -448,7 +508,7 @@ cmd_post_process() {
         -v "${BARE_REPO}:/upstream:rw" \
         "${MIRROR_ARGS[@]+"${MIRROR_ARGS[@]}"}" \
         "${DOCKER_SOCK_ARGS[@]+"${DOCKER_SOCK_ARGS[@]}"}" \
-        -e "ANTHROPIC_API_KEY=${pp_resolved_api_key}" \
+        "${PP_CRED[@]+"${PP_CRED[@]}"}" \
         "${EXTRA_ENV[@]+"${EXTRA_ENV[@]}"}" \
         "${CUSTOM_ENV_ARGS[@]+"${CUSTOM_ENV_ARGS[@]}"}" \
         -e "CLAUDE_MODEL=${pp_model}" \
@@ -511,6 +571,7 @@ Environment:
   SWARM_MAX_IDLE            Idle sessions before exit (default: 3).
   SWARM_EFFORT              Reasoning effort: low, medium, high.
   SWARM_TITLE               Dashboard title override.
+  SWARM_SKIP_SMOKE          Skip auth smoke test (default: false).
 HELP
 }
 
