@@ -10,7 +10,8 @@ PROJECT="$(basename "$REPO_ROOT")"
 SWARM_RUN_HASH="$(git -C "$REPO_ROOT" rev-parse --short=7 HEAD 2>/dev/null || echo "unknown")"
 SWARM_RUN_BRANCH="$(git -C "$REPO_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")"
 SWARM_RUN_CONTEXT="${PROJECT}@${SWARM_RUN_HASH} (${SWARM_RUN_BRANCH})"
-BARE_REPO="/tmp/${PROJECT}-upstream.git"
+SWARM_DATA_DIR="${SWARM_DATA_DIR:-${REPO_ROOT}/.swarm}"
+BARE_REPO="${SWARM_DATA_DIR}/bare"
 IMAGE_NAME="${PROJECT}-agent"
 
 # Populate _CRED_ENV with -e flags for Docker credential
@@ -154,6 +155,8 @@ cmd_start() {
             fi
         fi
     fi
+
+    mkdir -p "$SWARM_DATA_DIR"
 
     echo "--- Creating bare repo ---"
     rm_docker_dir "$BARE_REPO"
@@ -571,6 +574,7 @@ Environment:
   SWARM_MAX_IDLE            Idle sessions before exit (default: 3).
   SWARM_EFFORT              Reasoning effort: low, medium, high.
   SWARM_TITLE               Dashboard title override.
+  SWARM_DATA_DIR            Persistent data dir (default: $REPO/.swarm).
   SWARM_SKIP_SMOKE          Skip auth smoke test (default: false).
 HELP
 }
