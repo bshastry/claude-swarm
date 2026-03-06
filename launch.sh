@@ -556,6 +556,22 @@ cmd_post_process() {
     "$SWARM_DIR/harvest.sh"
 }
 
+cmd_clean() {
+    local mode="${1:-}"
+    if [ "$mode" = "--all" ]; then
+        echo "--- Removing ${SWARM_DATA_DIR} ---"
+        rm_docker_dir "$SWARM_DATA_DIR"
+    else
+        echo "--- Cleaning logs (preserving bare repo) ---"
+        rm_docker_dir "${SWARM_DATA_DIR}/logs"
+    fi
+    # Clean up legacy /tmp mirrors.
+    rm -f "/tmp/${PROJECT}-swarm.env"
+    rm -f "/tmp/${PROJECT}-mirror-vols.txt"
+    rm -f "/tmp/${PROJECT}-agents.cfg"
+    echo "Done."
+}
+
 cmd_help() {
     cat <<HELP
 Usage: $0 COMMAND [OPTIONS]
@@ -570,6 +586,8 @@ Commands:
   status               Show running/stopped state for each agent.
   wait                 Block until all agents exit, then harvest.
   post-process         Run the post-processing agent from the config.
+  clean            Remove session logs from .swarm/logs/.
+  clean --all      Remove entire .swarm/ directory.
 
 Environment:
   ANTHROPIC_API_KEY         API key (required unless OAuth token or config).
@@ -599,8 +617,9 @@ case "${1:-start}" in
     status)        cmd_status ;;
     wait)          cmd_wait ;;
     post-process)  cmd_post_process ;;
+    clean)         cmd_clean "${2:-}" ;;
     *)
-        echo "Usage: $0 {start|stop|logs N|status|wait|post-process}" >&2
+        echo "Usage: $0 {start|stop|logs N|status|wait|post-process|clean}" >&2
         echo "Try '$0 --help' for more information." >&2
         exit 1
         ;;
