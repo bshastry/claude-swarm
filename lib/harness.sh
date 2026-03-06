@@ -158,31 +158,51 @@ while true; do
            "${APPEND_ARGS[@]+"${APPEND_ARGS[@]}"}" \
            > "$LOGFILE" 2>"${LOGFILE}.err" || true
 
-    # Error detection (BUG-003).
-    is_err=$(jq -r '.is_error // false' "$LOGFILE" \
-      2>/dev/null || true)
-    is_err="${is_err:-false}"
-    err_result=$(jq -r '.result // ""' "$LOGFILE" \
-      2>/dev/null || true)
-    err_result="${err_result:-}"
+    # Extract the result event from NDJSON stream.
+    # The last line with type=result contains session
+    # summary (cost, tokens, duration, errors).
+    SUMMARY=$(grep '"type":"result"' "$LOGFILE" \
+      | tail -1 || true)
+    if [ -z "$SUMMARY" ]; then
+        # No result event: session crashed before
+        # producing summary. Treat as error.
+        is_err="true"
+        err_result="No result event in JSONL output"
+    else
+        is_err=$(echo "$SUMMARY" \
+          | jq -r '.is_error // false' 2>/dev/null \
+          || true)
+        is_err="${is_err:-false}"
+        err_result=$(echo "$SUMMARY" \
+          | jq -r '.result // ""' 2>/dev/null \
+          || true)
+        err_result="${err_result:-}"
+    fi
 
-    # Extract usage stats from JSON output.
-    cost=$(jq -r '.total_cost_usd // 0' "$LOGFILE" 2>/dev/null || true)
-    cost="${cost:-0}"
-    dur=$(jq -r '.duration_ms // 0' "$LOGFILE" 2>/dev/null || true)
-    dur="${dur:-0}"
-    api_ms=$(jq -r '.duration_api_ms // 0' "$LOGFILE" 2>/dev/null || true)
-    api_ms="${api_ms:-0}"
-    turns=$(jq -r '.num_turns // 0' "$LOGFILE" 2>/dev/null || true)
-    turns="${turns:-0}"
-    tok_in=$(jq -r '.usage.input_tokens // 0' "$LOGFILE" 2>/dev/null || true)
-    tok_in="${tok_in:-0}"
-    tok_out=$(jq -r '.usage.output_tokens // 0' "$LOGFILE" 2>/dev/null || true)
-    tok_out="${tok_out:-0}"
-    cache_rd=$(jq -r '.usage.cache_read_input_tokens // 0' "$LOGFILE" 2>/dev/null || true)
-    cache_rd="${cache_rd:-0}"
-    cache_cr=$(jq -r '.usage.cache_creation_input_tokens // 0' "$LOGFILE" 2>/dev/null || true)
-    cache_cr="${cache_cr:-0}"
+    # Extract usage stats from the result event.
+    if [ -n "$SUMMARY" ]; then
+        cost=$(echo "$SUMMARY" \
+          | jq -r '.total_cost_usd // 0')
+        dur=$(echo "$SUMMARY" \
+          | jq -r '.duration_ms // 0')
+        api_ms=$(echo "$SUMMARY" \
+          | jq -r '.duration_api_ms // 0')
+        turns=$(echo "$SUMMARY" \
+          | jq -r '.num_turns // 0')
+        tok_in=$(echo "$SUMMARY" \
+          | jq -r '.usage.input_tokens // 0')
+        tok_out=$(echo "$SUMMARY" \
+          | jq -r '.usage.output_tokens // 0')
+        cache_rd=$(echo "$SUMMARY" \
+          | jq -r \
+          '.usage.cache_read_input_tokens // 0')
+        cache_cr=$(echo "$SUMMARY" \
+          | jq -r \
+          '.usage.cache_creation_input_tokens // 0')
+    else
+        cost=0 dur=0 api_ms=0 turns=0
+        tok_in=0 tok_out=0 cache_rd=0 cache_cr=0
+    fi
     mkdir -p "$(dirname "$STATS_FILE")"
     # Skip TSV for error sessions (e.g. rate limit)
     # to avoid inflating dashboard turn count.
