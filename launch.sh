@@ -327,7 +327,7 @@ cmd_start() {
         docker run -d \
             --name "$NAME" \
             -v "${BARE_REPO}:/upstream:rw" \
-            -v "${AGENT_LOG_DIR}:/workspace/agent_logs" \
+            -v "${AGENT_LOG_DIR}:/agent_logs" \
             "${MIRROR_ARGS[@]+"${MIRROR_ARGS[@]}"}" \
             "${DOCKER_SOCK_ARGS[@]+"${DOCKER_SOCK_ARGS[@]}"}" \
             "${AGENT_CRED[@]+"${AGENT_CRED[@]}"}" \
@@ -522,7 +522,7 @@ cmd_post_process() {
     docker run -d \
         --name "$NAME" \
         -v "${BARE_REPO}:/upstream:rw" \
-        -v "${PP_LOG_DIR}:/workspace/agent_logs" \
+        -v "${PP_LOG_DIR}:/agent_logs" \
         "${MIRROR_ARGS[@]+"${MIRROR_ARGS[@]}"}" \
         "${DOCKER_SOCK_ARGS[@]+"${DOCKER_SOCK_ARGS[@]}"}" \
         "${PP_CRED[@]+"${PP_CRED[@]}"}" \

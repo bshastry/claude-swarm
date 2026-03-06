@@ -31,9 +31,9 @@ fi
 
 read_agent_stats() {
     local name=$1 agent_id=$2
-    local stats_file="agent_logs/stats_agent_${agent_id}.tsv"
+    local stats_file="stats_agent_${agent_id}.tsv"
     local tmpf="/tmp/.swarm-stats-${name}.tsv"
-    docker cp "${name}:/workspace/${stats_file}" "$tmpf" 2>/dev/null || true
+    docker cp "${name}:/agent_logs/${stats_file}" "$tmpf" 2>/dev/null || true
     if [ ! -s "$tmpf" ]; then
         rm -f "$tmpf"
         echo "0 0 0 0 0 0 0"

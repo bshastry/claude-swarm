@@ -44,7 +44,7 @@ SWARM_PROMPT="${SWARM_PROMPT:?SWARM_PROMPT is required.}"
 SWARM_SETUP="${SWARM_SETUP:-}"
 MAX_IDLE="${MAX_IDLE:-3}"
 INJECT_GIT_RULES="${INJECT_GIT_RULES:-true}"
-STATS_FILE="agent_logs/stats_agent_${AGENT_ID}.tsv"
+STATS_FILE="/agent_logs/stats_agent_${AGENT_ID}.tsv"
 
 GIT_USER_NAME="${GIT_USER_NAME:-swarm-agent}"
 GIT_USER_EMAIL="${GIT_USER_EMAIL:-agent@claude-swarm.local}"
@@ -63,13 +63,8 @@ echo "[harness:${AGENT_ID}] Starting (model=${CLAUDE_MODEL}, prompt=${SWARM_PROM
 
 if [ ! -d "/workspace/.git" ]; then
     echo "[harness:${AGENT_ID}] Cloning upstream to /workspace..."
-    # Clone to temp dir first: /workspace may be non-empty
-    # due to Docker bind mounts (e.g. agent_logs).
-    git clone /upstream /tmp/_upstream
-    cp -a /tmp/_upstream/.git /workspace/.git
-    rm -rf /tmp/_upstream
+    git clone /upstream /workspace
     cd /workspace
-    git reset --hard HEAD
 
     # Init only submodules whose mirrors were mounted into the
     # container. Client submodules without mirrors keep their
@@ -126,12 +121,11 @@ HOOK
     [ -f "$HOME/.cargo/env" ] && source "$HOME/.cargo/env"
     export PATH="/usr/local/go/bin:$HOME/go/bin:${PATH}"
 
-    mkdir -p agent_logs
+    mkdir -p /agent_logs
     echo "[harness:${AGENT_ID}] Setup complete."
 fi
 
 cd /workspace
-STATS_FILE="/workspace/${STATS_FILE}"
 
 IDLE_COUNT=0
 BACKOFF=300
@@ -144,9 +138,9 @@ while true; do
 
     BEFORE=$(git rev-parse origin/agent-work)
     COMMIT=$(git rev-parse --short=6 HEAD)
-    LOGFILE="agent_logs/agent_${AGENT_ID}_${COMMIT}_$(date +%s).jsonl"
-    mkdir -p agent_logs
-    ln -sf "$(basename "$LOGFILE")" agent_logs/latest.jsonl
+    LOGFILE="/agent_logs/agent_${AGENT_ID}_${COMMIT}_$(date +%s).jsonl"
+    mkdir -p /agent_logs
+    ln -sf "$(basename "$LOGFILE")" /agent_logs/latest.jsonl
 
     echo "[harness:${AGENT_ID}] Starting session at ${COMMIT}..."
 
