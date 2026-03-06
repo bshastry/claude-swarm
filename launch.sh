@@ -297,6 +297,8 @@ cmd_start() {
     AGENT_IDX=0
     while IFS='|' read -r agent_model agent_base_url agent_api_key agent_effort agent_auth; do
         AGENT_IDX=$((AGENT_IDX + 1))
+        AGENT_LOG_DIR="${SWARM_DATA_DIR}/logs/agent-${AGENT_IDX}"
+        mkdir -p "$AGENT_LOG_DIR"
         NAME="${IMAGE_NAME}-${AGENT_IDX}"
         docker rm -f "$NAME" 2>/dev/null || true
 
@@ -318,6 +320,7 @@ cmd_start() {
         docker run -d \
             --name "$NAME" \
             -v "${BARE_REPO}:/upstream:rw" \
+            -v "${AGENT_LOG_DIR}:/workspace/agent_logs" \
             "${MIRROR_ARGS[@]+"${MIRROR_ARGS[@]}"}" \
             "${DOCKER_SOCK_ARGS[@]+"${DOCKER_SOCK_ARGS[@]}"}" \
             "${AGENT_CRED[@]+"${AGENT_CRED[@]}"}" \
@@ -505,10 +508,14 @@ cmd_post_process() {
         fi
     fi
 
+    PP_LOG_DIR="${SWARM_DATA_DIR}/logs/agent-post"
+    mkdir -p "$PP_LOG_DIR"
+
     echo "--- Starting post-processing (${pp_model}) ---"
     docker run -d \
         --name "$NAME" \
         -v "${BARE_REPO}:/upstream:rw" \
+        -v "${PP_LOG_DIR}:/workspace/agent_logs" \
         "${MIRROR_ARGS[@]+"${MIRROR_ARGS[@]}"}" \
         "${DOCKER_SOCK_ARGS[@]+"${DOCKER_SOCK_ARGS[@]}"}" \
         "${PP_CRED[@]+"${PP_CRED[@]}"}" \
