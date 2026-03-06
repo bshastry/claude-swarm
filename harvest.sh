@@ -6,7 +6,8 @@ set -euo pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 PROJECT="$(basename "$REPO_ROOT")"
-BARE_REPO="/tmp/${PROJECT}-upstream.git"
+SWARM_DATA_DIR="${SWARM_DATA_DIR:-${REPO_ROOT}/.swarm}"
+BARE_REPO="${SWARM_DATA_DIR}/bare"
 REMOTE_NAME="_agent-harvest"
 DRY_RUN=false
 

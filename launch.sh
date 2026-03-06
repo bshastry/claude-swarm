@@ -56,6 +56,12 @@ build_cred_env() {
 # we never need sudo/su -c.
 rm_docker_dir() {
     local dir="$1"
+    # Guard against empty or root paths.
+    if [ -z "$dir" ] || [ "$dir" = "/" ]; then
+        echo "ERROR: rm_docker_dir called with" \
+             "unsafe path: '${dir}'" >&2
+        return 1
+    fi
     [ -d "$dir" ] || return 0
     local parent base
     parent="$(dirname "$dir")"

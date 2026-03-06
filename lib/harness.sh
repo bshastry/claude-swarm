@@ -161,7 +161,7 @@ while true; do
     # Extract the result event from NDJSON stream.
     # The last line with type=result contains session
     # summary (cost, tokens, duration, errors).
-    SUMMARY=$(grep '"type":"result"' "$LOGFILE" \
+    SUMMARY=$(grep '^{.*"type":"result"' "$LOGFILE" \
       | tail -1 || true)
     if [ -z "$SUMMARY" ]; then
         # No result event: session crashed before
@@ -180,7 +180,11 @@ while true; do
     fi
 
     # Extract usage stats from the result event.
-    if [ -n "$SUMMARY" ]; then
+    # Guard: if SUMMARY matched a non-JSON line, jq
+    # will fail. Validate before parsing.
+    if [ -n "$SUMMARY" ] \
+        && echo "$SUMMARY" | jq -e . >/dev/null 2>&1
+    then
         cost=$(echo "$SUMMARY" \
           | jq -r '.total_cost_usd // 0')
         dur=$(echo "$SUMMARY" \

@@ -16,7 +16,8 @@ fi
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 PROJECT="$(basename "$REPO_ROOT")"
-BARE_REPO="/tmp/${PROJECT}-upstream.git"
+SWARM_DATA_DIR="${SWARM_DATA_DIR:-${REPO_ROOT}/.swarm}"
+BARE_REPO="${SWARM_DATA_DIR}/bare"
 CHECK_DIR="/tmp/${PROJECT}-progress-check"
 
 if [ ! -d "$BARE_REPO" ]; then

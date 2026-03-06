@@ -21,9 +21,9 @@ Add as a submodule:
 ## How it works
 
 ```
-Host                         .swarm/
-~/project/ ── git clone ──>  bare/           (rw)
-               --bare        logs/agent-N/   (per-agent NDJSON)
+Host
+~/project/ ── git clone ──>  .swarm/bare/           (rw)
+               --bare        .swarm/logs/agent-N/   (per-agent NDJSON)
                              /tmp/project-mirror-*.git (ro)
                                         |
                                         | docker volumes

@@ -7,7 +7,8 @@ set -euo pipefail
 SWARM_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 PROJECT="$(basename "$REPO_ROOT")"
-BARE_REPO="/tmp/${PROJECT}-upstream.git"
+SWARM_DATA_DIR="${SWARM_DATA_DIR:-${REPO_ROOT}/.swarm}"
+BARE_REPO="${SWARM_DATA_DIR}/bare"
 IMAGE_NAME="${PROJECT}-agent"
 START_TIME=$(date +%s)
 
