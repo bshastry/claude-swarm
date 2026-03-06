@@ -63,8 +63,13 @@ echo "[harness:${AGENT_ID}] Starting (model=${CLAUDE_MODEL}, prompt=${SWARM_PROM
 
 if [ ! -d "/workspace/.git" ]; then
     echo "[harness:${AGENT_ID}] Cloning upstream to /workspace..."
-    git clone /upstream /workspace
+    # Clone to temp dir first: /workspace may be non-empty
+    # due to Docker bind mounts (e.g. agent_logs).
+    git clone /upstream /tmp/_upstream
+    cp -a /tmp/_upstream/.git /workspace/.git
+    rm -rf /tmp/_upstream
     cd /workspace
+    git reset --hard HEAD
 
     # Init only submodules whose mirrors were mounted into the
     # container. Client submodules without mirrors keep their
