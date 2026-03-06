@@ -139,8 +139,9 @@ while true; do
 
     BEFORE=$(git rev-parse origin/agent-work)
     COMMIT=$(git rev-parse --short=6 HEAD)
-    LOGFILE="agent_logs/agent_${AGENT_ID}_${COMMIT}_$(date +%s).log"
+    LOGFILE="agent_logs/agent_${AGENT_ID}_${COMMIT}_$(date +%s).jsonl"
     mkdir -p agent_logs
+    ln -sf "$(basename "$LOGFILE")" agent_logs/latest.jsonl
 
     echo "[harness:${AGENT_ID}] Starting session at ${COMMIT}..."
 
@@ -152,8 +153,10 @@ while true; do
     claude --dangerously-skip-permissions \
            -p "$(cat "$SWARM_PROMPT")" \
            --model "$CLAUDE_MODEL" \
+           --verbose \
+           --output-format stream-json \
            "${APPEND_ARGS[@]+"${APPEND_ARGS[@]}"}" \
-           --output-format json > "$LOGFILE" 2>"${LOGFILE}.err" || true
+           > "$LOGFILE" 2>"${LOGFILE}.err" || true
 
     # Error detection (BUG-003).
     is_err=$(jq -r '.is_error // false' "$LOGFILE" \
