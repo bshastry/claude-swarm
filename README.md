@@ -21,9 +21,10 @@ Add as a submodule:
 ## How it works
 
 ```
-Host                         /tmp (bare repos)
-~/project/ ── git clone ──>  project-upstream.git (rw)
-               --bare        project-mirror-*.git (ro)
+Host                         .swarm/
+~/project/ ── git clone ──>  bare/           (rw)
+               --bare        logs/agent-N/   (per-agent NDJSON)
+                             /tmp/project-mirror-*.git (ro)
                                         |
                                         | docker volumes
                                         |
@@ -32,6 +33,7 @@ Host                         /tmp (bare repos)
            Container 1            Container 2       ...
            /upstream  (rw)        /upstream  (rw)
            /mirrors/* (ro)        /mirrors/* (ro)
+           /workspace/agent_logs  /workspace/agent_logs
                  |                      |
                  v                      v
            /workspace/            /workspace/
@@ -39,7 +41,9 @@ Host                         /tmp (bare repos)
 ```
 
 All containers mount the same bare repo. When one agent
-pushes, others see the changes on the next fetch.
+pushes, others see the changes on the next fetch. Session
+logs are streamed as NDJSON to `.swarm/logs/agent-N/` and
+persist on the host after containers stop.
 
 Each container runs `lib/harness.sh`:
 
@@ -114,6 +118,7 @@ key is always used. The dashboard shows auth per agent.
 | `SWARM_NUM_AGENTS` | `3` | Container count. |
 | `SWARM_MAX_IDLE` | `3` | Idle sessions before exit. |
 | `SWARM_EFFORT` | | Reasoning effort. |
+| `SWARM_DATA_DIR` | `$REPO/.swarm` | Persistent data directory. |
 | `SWARM_INJECT_GIT_RULES` | `true` | Inject git rules. |
 | `SWARM_GIT_USER_NAME` | `swarm-agent` | Git author name. |
 | `SWARM_GIT_USER_EMAIL` | `agent@claude-swarm.local` | Git email. |

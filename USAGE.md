@@ -19,6 +19,8 @@
     ./launch.sh logs N             # Tail agent N logs.
     ./launch.sh wait               # Block, harvest, post-process.
     ./launch.sh post-process       # Run post-process agent.
+    ./launch.sh clean              # Remove session logs.
+    ./launch.sh clean --all        # Remove entire .swarm/ dir.
 
 ## Dashboard
 
@@ -105,6 +107,48 @@ work.
 Disable with `"inject_git_rules": false` in `swarm.json` or
 `SWARM_INJECT_GIT_RULES=false`.
 
+## Session logs
+
+Agent sessions are captured as NDJSON (stream-json) and
+persisted to `.swarm/logs/agent-N/` on the host. This is
+enabled by default — no configuration needed. Future runs
+populate `.swarm/` automatically.
+
+### Viewing agent conversations
+
+    # Latest session for agent 3 (human-readable).
+    ./view-agent.sh 3
+
+    # Live tail while agent is running.
+    ./view-agent.sh --follow 3
+
+    # Full tool output (no truncation).
+    ./view-agent.sh --full 3
+
+    # List all sessions for an agent.
+    ./view-agent.sh --list 3
+
+    # Specific session file.
+    ./view-agent.sh 3 .swarm/logs/agent-3/session.jsonl
+
+The viewer renders NDJSON events as colored text: agent
+reasoning, tool calls (truncated to 10 lines by default),
+and a session summary with cost/tokens/duration.
+
+### Directory layout
+
+    .swarm/
+      bare/                  # Bare repo (agent-work branch).
+      logs/
+        agent-1/
+          agent_1_abc123_*.jsonl   # Session log.
+          latest.jsonl             # Symlink to current.
+          stats_agent_1.tsv        # Per-session stats.
+        agent-2/
+          ...
+        agent-post/
+          ...
+
 ## Cost tracking
 
     ./costs.sh          # Table.
@@ -115,7 +159,8 @@ Stats collected per session inside each container
 
 ## Cleanup
 
-    rm -rf /tmp/<project>-upstream.git
+    ./launch.sh clean          # Remove logs, keep bare repo.
+    ./launch.sh clean --all    # Remove entire .swarm/ dir.
 
 ## Verify image
 
