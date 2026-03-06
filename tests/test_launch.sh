@@ -45,7 +45,7 @@ parse_agents_cfg() {
         [.model, (.base_url // ""), (.api_key // ""), (.effort // ""), (.auth // "")] | join("|")' "$1"
 }
 
-# Mirrors the per-agent credential selection in launch.sh.
+# Mirrors the credential selection logic in build_cred_env (launch.sh).
 resolve_agent_creds() {
     local agent_auth="$1" agent_api_key="$2" global_api_key="$3" global_oauth="$4"
     local resolved_key="" oauth_env=""
