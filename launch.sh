@@ -48,6 +48,7 @@ build_cred_env() {
     fi
     [ -n "${ANTHROPIC_AUTH_TOKEN:-}" ] \
         && _CRED_ENV+=(-e "ANTHROPIC_AUTH_TOKEN=${ANTHROPIC_AUTH_TOKEN}")
+    return 0
 }
 
 # Docker containers may create files owned by a different UID inside
