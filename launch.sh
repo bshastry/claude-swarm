@@ -99,6 +99,32 @@ if [ -n "$CONFIG_FILE" ]; then
     while IFS='=' read -r key value; do
         [ -n "$key" ] && CUSTOM_ENV_ARGS+=(-e "${key}=${value}")
     done < <(jq -r '.env // {} | to_entries[] | "\(.key)=\(.value)"' "$CONFIG_FILE")
+    # Parse custom volume mounts from config (if present).
+    # Format: "host_path:container_path[:mode]" where
+    # host_path is relative to repo root or absolute.
+    CUSTOM_VOL_ARGS=()
+    while IFS= read -r vol_spec; do
+        [ -z "$vol_spec" ] && continue
+        IFS=: read -r _vol_host _vol_container _vol_mode \
+            <<< "$vol_spec"
+        # Reject specs missing the container path.
+        if [ -z "$_vol_container" ]; then
+            echo "WARNING: malformed volume spec" \
+                "'${vol_spec}'; skipped." >&2
+            continue
+        fi
+        # Resolve relative host paths to repo root.
+        if [[ "$_vol_host" != /* ]]; then
+            _vol_host="${REPO_ROOT}/${_vol_host}"
+        fi
+        if [ -d "$_vol_host" ]; then
+            CUSTOM_VOL_ARGS+=(-v "${_vol_host}:${_vol_container}:${_vol_mode:-ro}")
+            echo "Volume: ${_vol_host} -> ${_vol_container} (${_vol_mode:-ro})"
+        else
+            echo "WARNING: volume source ${_vol_host}" \
+                "not found; skipped." >&2
+        fi
+    done < <(jq -r '.volumes // [] | .[]' "$CONFIG_FILE")
 else
     NUM_AGENTS="${SWARM_NUM_AGENTS:-3}"
     CLAUDE_MODEL="${SWARM_MODEL:-claude-opus-4-6}"
@@ -111,6 +137,7 @@ else
     DOCKER_SOCKET="false"
     EFFORT_LEVEL="${SWARM_EFFORT:-}"
     CUSTOM_ENV_ARGS=()
+    CUSTOM_VOL_ARGS=()
 fi
 
 cmd_start() {
@@ -330,6 +357,7 @@ cmd_start() {
             -v "${AGENT_LOG_DIR}:/agent_logs" \
             "${MIRROR_ARGS[@]+"${MIRROR_ARGS[@]}"}" \
             "${DOCKER_SOCK_ARGS[@]+"${DOCKER_SOCK_ARGS[@]}"}" \
+            "${CUSTOM_VOL_ARGS[@]+"${CUSTOM_VOL_ARGS[@]}"}" \
             "${AGENT_CRED[@]+"${AGENT_CRED[@]}"}" \
             "${EXTRA_ENV[@]+"${EXTRA_ENV[@]}"}" \
             "${CUSTOM_ENV_ARGS[@]+"${CUSTOM_ENV_ARGS[@]}"}" \
@@ -525,6 +553,7 @@ cmd_post_process() {
         -v "${PP_LOG_DIR}:/agent_logs" \
         "${MIRROR_ARGS[@]+"${MIRROR_ARGS[@]}"}" \
         "${DOCKER_SOCK_ARGS[@]+"${DOCKER_SOCK_ARGS[@]}"}" \
+        "${CUSTOM_VOL_ARGS[@]+"${CUSTOM_VOL_ARGS[@]}"}" \
         "${PP_CRED[@]+"${PP_CRED[@]}"}" \
         "${EXTRA_ENV[@]+"${EXTRA_ENV[@]}"}" \
         "${CUSTOM_ENV_ARGS[@]+"${CUSTOM_ENV_ARGS[@]}"}" \
