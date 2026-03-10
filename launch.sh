@@ -287,17 +287,20 @@ cmd_start() {
         echo "-v ${mirror}:/mirrors/${name}:ro"
     done > "/tmp/${PROJECT}-mirror-vols.txt"
 
-    # Build per-agent config (model|base_url|api_key|effort|auth per line).
+    # Build per-agent config (model|base_url|api_key|effort|auth|prompt|delay per line).
     # Uses pipe delimiter because bash IFS=$'\t' collapses consecutive tabs.
     AGENTS_CFG="/tmp/${PROJECT}-agents.cfg"
     if [ -n "$CONFIG_FILE" ]; then
         jq -r '.agents[] | range(.count) as $i |
-            [.model, (.base_url // ""), (.api_key // ""), (.effort // ""), (.auth // "")] | join("|")' \
+            [.model, (.base_url // ""), (.api_key // ""),
+             (.effort // ""), (.auth // ""),
+             (.prompt // ""), (.delay // 0 | tostring)
+            ] | join("|")' \
             "$CONFIG_FILE" > "$AGENTS_CFG"
     else
         : > "$AGENTS_CFG"
         for _i in $(seq 1 "$NUM_AGENTS"); do
-            printf '%s|||%s|\n' "$CLAUDE_MODEL" "${EFFORT_LEVEL:-}" >> "$AGENTS_CFG"
+            printf '%s|||%s|||0\n' "$CLAUDE_MODEL" "${EFFORT_LEVEL:-}" >> "$AGENTS_CFG"
         done
     fi
 
@@ -329,8 +332,32 @@ cmd_start() {
     fi
 
     AGENT_IDX=0
-    while IFS='|' read -r agent_model agent_base_url agent_api_key agent_effort agent_auth; do
+    while IFS='|' read -r agent_model agent_base_url agent_api_key agent_effort agent_auth agent_prompt agent_delay; do
         AGENT_IDX=$((AGENT_IDX + 1))
+
+        # Default delay to 0; guard sleep under set -e.
+        # NOTE: sleep is BLOCKING — launch.sh will not
+        # return until the delay completes. This is
+        # intentional: Sonnet must be the last agent in
+        # the config. Callers should background launch.sh
+        # if they need immediate control (run.sh does this).
+        agent_delay="${agent_delay:-0}"
+        if [ "$agent_delay" -gt 0 ] 2>/dev/null; then
+            echo "  Delaying ${agent_delay}s before" \
+                "launch..."
+            sleep "$agent_delay"
+        fi
+
+        # Per-agent prompt (falls back to top-level).
+        local agent_swarm_prompt="${agent_prompt:-${SWARM_PROMPT}}"
+        if [ -n "$agent_prompt" ] \
+            && [ ! -f "$REPO_ROOT/$agent_prompt" ]; then
+            echo "WARNING: agent prompt" \
+                "${agent_prompt} not found;" \
+                "using top-level prompt." >&2
+            agent_swarm_prompt="$SWARM_PROMPT"
+        fi
+
         AGENT_LOG_DIR="${SWARM_DATA_DIR}/logs/agent-${AGENT_IDX}"
         mkdir -p "$AGENT_LOG_DIR"
         NAME="${IMAGE_NAME}-${AGENT_IDX}"
@@ -362,7 +389,7 @@ cmd_start() {
             "${EXTRA_ENV[@]+"${EXTRA_ENV[@]}"}" \
             "${CUSTOM_ENV_ARGS[@]+"${CUSTOM_ENV_ARGS[@]}"}" \
             -e "CLAUDE_MODEL=${agent_model}" \
-            -e "SWARM_PROMPT=${SWARM_PROMPT}" \
+            -e "SWARM_PROMPT=${agent_swarm_prompt}" \
             -e "SWARM_SETUP=${SWARM_SETUP}" \
             -e "MAX_IDLE=${MAX_IDLE}" \
             -e "GIT_USER_NAME=${GIT_USER_NAME}" \
@@ -371,7 +398,7 @@ cmd_start() {
             -e "AGENT_ID=${AGENT_IDX}" \
             -e "SWARM_AUTH_MODE=${agent_auth}" \
             -e "SWARM_RUN_CONTEXT=${SWARM_RUN_CONTEXT}" \
-            -e "SWARM_CFG_PROMPT=${SWARM_PROMPT}" \
+            -e "SWARM_CFG_PROMPT=${agent_swarm_prompt}" \
             -e "SWARM_CFG_SETUP=${SWARM_SETUP}" \
             "$IMAGE_NAME"
     done < "$AGENTS_CFG"
