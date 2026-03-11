@@ -287,20 +287,24 @@ cmd_start() {
         echo "-v ${mirror}:/mirrors/${name}:ro"
     done > "/tmp/${PROJECT}-mirror-vols.txt"
 
-    # Build per-agent config (model|base_url|api_key|effort|auth|prompt|delay per line).
-    # Uses pipe delimiter because bash IFS=$'\t' collapses consecutive tabs.
+    # Build per-agent config (model|base_url|api_key|effort|
+    # auth|prompt|delay|docker_socket per line).
+    # Uses pipe delimiter because IFS=$'\t' collapses tabs.
     AGENTS_CFG="/tmp/${PROJECT}-agents.cfg"
     if [ -n "$CONFIG_FILE" ]; then
         jq -r '.agents[] | range(.count) as $i |
             [.model, (.base_url // ""), (.api_key // ""),
              (.effort // ""), (.auth // ""),
-             (.prompt // ""), (.delay // 0 | tostring)
+             (.prompt // ""), (.delay // 0 | tostring),
+             (if .docker_socket == true then "true"
+              elif .docker_socket == false then "false"
+              else "" end)
             ] | join("|")' \
             "$CONFIG_FILE" > "$AGENTS_CFG"
     else
         : > "$AGENTS_CFG"
         for _i in $(seq 1 "$NUM_AGENTS"); do
-            printf '%s|||%s|||0\n' "$CLAUDE_MODEL" "${EFFORT_LEVEL:-}" >> "$AGENTS_CFG"
+            printf '%s|||%s|||0|\n' "$CLAUDE_MODEL" "${EFFORT_LEVEL:-}" >> "$AGENTS_CFG"
         done
     fi
 
@@ -311,28 +315,8 @@ cmd_start() {
         MIRROR_ARGS+=($line)
     done < "/tmp/${PROJECT}-mirror-vols.txt"
 
-    # Mount Docker socket when config requests it (for Kurtosis).
-    # --group-add: match host socket GID so agent user can access.
-    # --network host: Kurtosis publishes ports on 127.0.0.1;
-    #   bridge-networked containers cannot reach them.
-    # Note: stat -c is GNU coreutils (Linux-only, not macOS).
-    DOCKER_SOCK_ARGS=()
-    if [ "$DOCKER_SOCKET" = "true" ]; then
-        DOCKER_SOCK_ARGS+=(-v "/var/run/docker.sock:/var/run/docker.sock")
-        DOCKER_SOCK_ARGS+=(--network host)
-        if [ -S /var/run/docker.sock ]; then
-            local sock_gid
-            sock_gid=$(stat -c '%g' /var/run/docker.sock)
-            DOCKER_SOCK_ARGS+=(--group-add "$sock_gid")
-        else
-            echo "WARNING: docker_socket=true but" \
-                "/var/run/docker.sock not found;" \
-                "--group-add skipped." >&2
-        fi
-    fi
-
     AGENT_IDX=0
-    while IFS='|' read -r agent_model agent_base_url agent_api_key agent_effort agent_auth agent_prompt agent_delay; do
+    while IFS='|' read -r agent_model agent_base_url agent_api_key agent_effort agent_auth agent_prompt agent_delay agent_docker_socket; do
         AGENT_IDX=$((AGENT_IDX + 1))
 
         # Default delay to 0; guard sleep under set -e.
@@ -346,6 +330,25 @@ cmd_start() {
             echo "  Delaying ${agent_delay}s before" \
                 "launch..."
             sleep "$agent_delay"
+        fi
+
+        # Per-agent docker_socket overrides global default.
+        local use_docker="${agent_docker_socket:-${DOCKER_SOCKET}}"
+        local DOCKER_SOCK_ARGS=()
+        if [ "$use_docker" = "true" ]; then
+            DOCKER_SOCK_ARGS+=(-v "/var/run/docker.sock:/var/run/docker.sock")
+            DOCKER_SOCK_ARGS+=(--network host)
+            if [ -S /var/run/docker.sock ]; then
+                local sock_gid
+                sock_gid=$(stat -c '%g' /var/run/docker.sock)
+                DOCKER_SOCK_ARGS+=(--group-add "$sock_gid")
+                echo "  docker: socket GID=${sock_gid}," \
+                    "--network host, --group-add ${sock_gid}"
+            else
+                echo "WARNING: docker_socket=true but" \
+                    "/var/run/docker.sock not found;" \
+                    "--group-add skipped." >&2
+            fi
         fi
 
         # Per-agent prompt (falls back to top-level).
@@ -554,15 +557,24 @@ cmd_post_process() {
     [ -n "$pp_effort" ] \
         && EXTRA_ENV+=(-e "CLAUDE_CODE_EFFORT_LEVEL=${pp_effort}")
 
-    # Mount Docker socket when config requests it (for Kurtosis).
+    # Per-section docker_socket overrides global default.
+    local pp_docker_socket
+    pp_docker_socket=$(jq -r \
+        'if .post_process.docker_socket == true then "true"
+         elif .post_process.docker_socket == false then "false"
+         else "" end' "$CONFIG_FILE")
+    local use_docker="${pp_docker_socket:-${DOCKER_SOCKET}}"
     local DOCKER_SOCK_ARGS=()
-    if [ "$DOCKER_SOCKET" = "true" ]; then
+    if [ "$use_docker" = "true" ]; then
         DOCKER_SOCK_ARGS+=(-v "/var/run/docker.sock:/var/run/docker.sock")
         DOCKER_SOCK_ARGS+=(--network host)
         if [ -S /var/run/docker.sock ]; then
             local sock_gid
             sock_gid=$(stat -c '%g' /var/run/docker.sock)
             DOCKER_SOCK_ARGS+=(--group-add "$sock_gid")
+            echo "  post-process docker:" \
+                "socket GID=${sock_gid}," \
+                "--network host, --group-add ${sock_gid}"
         else
             echo "WARNING: docker_socket=true but" \
                 "/var/run/docker.sock not found;" \
