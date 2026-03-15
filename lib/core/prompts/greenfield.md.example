@@ -1,0 +1,37 @@
+# Task: Build [PROJECT NAME]
+
+## Goal
+
+Build a [describe the project] from scratch in this empty
+repository.
+
+## Requirements
+
+1. [Requirement 1]
+2. [Requirement 2]
+3. [Requirement 3]
+
+## Technical constraints
+
+- Language: [e.g. Go, Rust, Python, TypeScript]
+- Must include: working build, tests, CI config.
+- Keep dependencies minimal.
+
+## Architecture hints
+
+Suggested project structure (adapt as needed):
+
+    src/          — source code
+    tests/        — test files
+    Makefile      — build commands
+
+## What to do
+
+1. Read existing files (other agents may have pushed).
+2. Pick ONE piece of work that is not yet done.
+3. Implement it with tests.
+4. Push your commit (follow the git rules below).
+5. Stop after pushing — you will be restarted with the
+   latest state.
+
+Do NOT duplicate work already committed by other agents.

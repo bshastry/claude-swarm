@@ -1,0 +1,34 @@
+# Task: [DESCRIBE THE IMPROVEMENT]
+
+## Context
+
+This is an existing project. Read the codebase first to
+understand the architecture before making changes.
+
+## Goal
+
+[Describe what needs to change and why.]
+
+## Scope
+
+Files likely affected:
+- [path/to/file1]
+- [path/to/file2]
+
+Do NOT modify files outside this scope unless necessary.
+
+## Acceptance criteria
+
+1. [Criterion 1 — testable]
+2. [Criterion 2 — testable]
+3. All existing tests still pass.
+
+## What to do
+
+1. Read existing code and recent commits (other agents
+   may have pushed changes).
+2. Identify ONE task from the scope that is not yet done.
+3. Implement it. Add or update tests.
+4. Run the test suite to verify nothing broke.
+5. Push your commit.
+6. Stop — you will be restarted with the latest state.

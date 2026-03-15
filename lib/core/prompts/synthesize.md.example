@@ -1,0 +1,42 @@
+# Task: Synthesize [NEW PROJECT] from reference repos
+
+## Context
+
+Reference repositories are available under `refs/`:
+
+    refs/MANIFEST.md   — lists all available references.
+    refs/[name]/       — full source tree of each repo.
+
+These are READ-ONLY context. Do NOT modify anything under
+`refs/`. Build the new project in the repo root.
+
+## Goal
+
+[Describe what the unified project should do and how it
+relates to the reference repos.]
+
+## What to extract from each reference
+
+- **refs/[repo-a]/**: [what to take — APIs, patterns, data
+  models, etc.]
+- **refs/[repo-b]/**: [what to take]
+
+## Requirements for the new project
+
+1. [Requirement 1]
+2. [Requirement 2]
+3. Must build and pass tests independently (no dependency
+   on the reference repos at runtime).
+
+## What to do
+
+1. Read `refs/MANIFEST.md` and browse the reference code.
+2. Read existing files in the repo root — other agents
+   may have already started building.
+3. Pick ONE piece of work that is not yet done.
+4. Implement it, drawing from the reference repos as
+   needed. Add tests.
+5. Push your commit.
+6. Stop — you will be restarted with the latest state.
+
+Do NOT copy code verbatim. Adapt, simplify, and unify.
