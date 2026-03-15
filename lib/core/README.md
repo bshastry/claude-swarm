@@ -43,7 +43,54 @@ injected into every session).
 
 ## Quick start
 
-### Greenfield — build a project from scratch
+### Option A: Docker (one container per idea)
+
+Each container is self-contained. N agents run as parallel
+processes inside it. You just provide a prompt and an API
+key.
+
+```bash
+# Greenfield: build from scratch.
+ANTHROPIC_API_KEY=sk-... \
+    ./lib/core/swarm-docker.sh greenfield \
+    --prompt prompts/build-cli.md \
+    --agents 3 \
+    --out ./my-project
+
+# Improve: modify a GitHub repo.
+ANTHROPIC_API_KEY=sk-... \
+    ./lib/core/swarm-docker.sh improve \
+    --repo https://github.com/user/project \
+    --prompt prompts/add-tests.md \
+    --agents 4
+
+# Synthesize: combine repos.
+ANTHROPIC_API_KEY=sk-... \
+    ./lib/core/swarm-docker.sh synthesize \
+    --repos https://github.com/a/auth,https://github.com/b/db \
+    --prompt prompts/unified-api.md \
+    --agents 5 \
+    --out ./unified
+```
+
+Run in background with `--detach`:
+
+```bash
+./lib/core/swarm-docker.sh greenfield \
+    --prompt prompts/task.md \
+    --agents 3 \
+    --out ./project \
+    --detach
+
+# Check progress:
+docker logs -f swarm-greenfield-12345
+
+# Results appear in ./project/ when done.
+```
+
+### Option B: Native (no Docker)
+
+Run agents directly on your machine:
 
 ```bash
 ANTHROPIC_API_KEY=sk-... \
@@ -51,22 +98,14 @@ ANTHROPIC_API_KEY=sk-... \
     --prompt prompts/my-task.md \
     --agents 3 \
     --out /tmp/my-project
-```
 
-### Improve — modify an existing GitHub repo
-
-```bash
 ANTHROPIC_API_KEY=sk-... \
     ./lib/core/swarm-run.sh improve \
     --repo https://github.com/user/project \
     --prompt prompts/add-tests.md \
     --agents 2 \
     --branch swarm-improvements
-```
 
-### Synthesize — combine repos into a new project
-
-```bash
 ANTHROPIC_API_KEY=sk-... \
     ./lib/core/swarm-run.sh synthesize \
     --repos https://github.com/a/auth,https://github.com/b/db \
@@ -82,7 +121,10 @@ ANTHROPIC_API_KEY=sk-... \
 ```
 lib/core/
 ├── swarm-core.sh        Library. Source this.
-├── swarm-run.sh         CLI wrapper (greenfield/improve/synthesize).
+├── swarm-run.sh         Native CLI (no Docker).
+├── swarm-docker.sh      Docker CLI (one container per idea).
+├── Dockerfile           Minimal image (debian + git + claude).
+├── entrypoint.sh        Container entrypoint (N agents inside).
 ├── coordination.md      Git rules template injected into agents.
 ├── example.sh           Minimal standalone example.
 ├── prompts/
@@ -329,6 +371,75 @@ based on the repo state.
    └── Active    new commits → idle=0, restart
 4. Harvest       swarm_harvest merges into target.
 ```
+
+## Docker workflow
+
+### Mental model
+
+```
+Host                        Container
+──────────                  ──────────────────────
+                            ┌──────────────────┐
+swarm-docker.sh ──launch──► │  entrypoint.sh   │
+    prompt.md ──mount──────►│                  │
+    API key ──env──────────►│  ┌──┐ ┌──┐ ┌──┐ │
+                            │  │A1│ │A2│ │A3│ │
+                            │  └──┘ └──┘ └──┘ │
+    ./out/ ◄──volume────────│  bare repo (git) │
+      project/              │                  │
+      logs/                 └──────────────────┘
+```
+
+One container per idea. N agents inside as processes.
+Results written to a host-mounted volume.
+
+### swarm-docker.sh reference
+
+```
+swarm-docker.sh MODE [OPTIONS]
+
+Modes:
+  greenfield    --prompt FILE --out DIR [--agents N]
+  improve       --prompt FILE --repo URL [--branch NAME]
+  synthesize    --prompt FILE --repos A,B --out DIR
+
+Options:
+  --agents N       Parallel agents (default: 3).
+  --model NAME     Claude model (default: claude-sonnet-4-6).
+  --max-idle N     Idle threshold (default: 3).
+  --setup FILE     Setup script (mounted into container).
+  --detach         Run in background.
+  --name NAME      Container name.
+```
+
+### What the container does
+
+1. Clones or inits the project (mode-dependent).
+2. Runs the optional setup script.
+3. Creates a bare repo for coordination.
+4. Forks N claude processes.
+5. Each process loops: fetch, work, push, check idle.
+6. When all agents idle, harvests and exits.
+7. Results at `/output/project/`, logs at `/output/logs/`.
+
+### Setup scripts
+
+For projects that need build tools (Go, Rust, Node):
+
+```bash
+# setup.sh
+sudo apt-get update && sudo apt-get install -y golang
+```
+
+```bash
+./lib/core/swarm-docker.sh greenfield \
+    --prompt prompts/task.md \
+    --agents 3 \
+    --out ./project \
+    --setup setup.sh
+```
+
+The script runs once before agents start.
 
 ## Comparison with full claude-swarm
 
