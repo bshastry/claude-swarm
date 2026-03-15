@@ -422,6 +422,62 @@ Options:
 6. When all agents idle, harvests and exits.
 7. Results at `/output/project/`, logs at `/output/logs/`.
 
+### Will I lose work if the container crashes?
+
+No. Three layers of protection:
+
+1. **Volume mount.** The `--out` directory is a host-
+   mounted volume at `/output`. Everything written there
+   persists after the container exits or crashes.
+2. **Bare repo on volume.** The coordination bare repo
+   lives at `/output/bare` (on the volume), not in `/tmp`.
+   Every agent push is immediately durable.
+3. **Emergency harvest.** An EXIT trap runs `swarm_harvest`
+   on any container exit (normal, SIGTERM, OOM). Even if
+   the container is killed mid-run, the harvest attempts
+   to merge whatever agents pushed.
+
+What you get in `--out` after any exit:
+
+```
+my-project/
+  project/    ← merged codebase (after harvest)
+  bare/       ← raw bare repo with all agent commits
+  logs/       ← per-agent session logs + cost stats
+```
+
+If harvest fails (e.g. merge conflict on crash), the
+bare repo still has every commit. Recover manually:
+
+```bash
+cd my-project/project
+git remote add bare ../bare
+git fetch bare agent-work
+git merge bare/agent-work
+```
+
+### Per-agent prompts (partition work)
+
+By default all agents share the same prompt. For larger
+tasks (N>5), partition work so agents don't duplicate
+effort:
+
+```bash
+./lib/core/swarm-docker.sh greenfield \
+    --prompt prompts/overview.md \
+    --agent-prompts prompts/api.md,prompts/cli.md,prompts/tests.md \
+    --agents 3 \
+    --out ./project
+```
+
+Agent 1 gets `api.md`, agent 2 gets `cli.md`, agent 3
+gets `tests.md`. If there are more agents than prompts,
+extras use the main `--prompt`.
+
+Each per-agent prompt should still include the
+coordination rules (read git log, push, stop). The
+coordination prompt is appended automatically.
+
 ### Setup scripts
 
 For projects that need build tools (Go, Rust, Node):

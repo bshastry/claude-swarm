@@ -47,6 +47,7 @@ MAX_IDLE="${SWARM_MAX_IDLE:-3}"
 SETUP_SCRIPT=""
 DETACH=false
 CONTAINER_NAME=""
+AGENT_PROMPTS=""
 
 usage() {
     cat <<'USAGE'
@@ -73,6 +74,9 @@ Options:
   --max-idle N     Idle sessions before exit (default: 3).
   --setup FILE     Setup script to run inside container
                    before agents start.
+  --agent-prompts  Comma-separated prompt files for
+       A,B,C      per-agent assignment. Agent 1 gets A,
+                   agent 2 gets B, etc. Extras use --prompt.
   --name NAME      Container name (default: auto).
   --detach         Run in background.
 
@@ -101,6 +105,7 @@ while [ $# -gt 0 ]; do
         --model)    MODEL="$2"; shift 2 ;;
         --max-idle) MAX_IDLE="$2"; shift 2 ;;
         --setup)    SETUP_SCRIPT="$2"; shift 2 ;;
+        --agent-prompts) AGENT_PROMPTS="$2"; shift 2 ;;
         --name)     CONTAINER_NAME="$2"; shift 2 ;;
         --detach)   DETACH=true; shift ;;
         -h|--help)  usage ;;
@@ -220,6 +225,27 @@ if [ -n "$SETUP_SCRIPT" ]; then
         -v "${SETUP_SCRIPT}:/setup.sh:ro"
         -e "SWARM_SETUP=/setup.sh"
     )
+fi
+
+# Per-agent prompts: mount each file and pass container
+# paths via AGENT_PROMPTS env var.
+if [ -n "$AGENT_PROMPTS" ]; then
+    IFS=',' read -ra AP <<< "$AGENT_PROMPTS"
+    CONTAINER_PATHS=()
+    IDX=0
+    for p in "${AP[@]}"; do
+        IDX=$((IDX + 1))
+        if [ ! -f "$p" ]; then
+            echo "ERROR: Agent prompt not found: ${p}" >&2
+            exit 1
+        fi
+        abs="$(cd "$(dirname "$p")" && pwd)/$(basename "$p")"
+        cpath="/agent-prompts/agent-${IDX}.md"
+        DOCKER_ARGS+=(-v "${abs}:${cpath}:ro")
+        CONTAINER_PATHS+=("$cpath")
+    done
+    joined=$(IFS=','; echo "${CONTAINER_PATHS[*]}")
+    DOCKER_ARGS+=(-e "AGENT_PROMPTS=${joined}")
 fi
 
 if [ "$DETACH" = "true" ]; then
